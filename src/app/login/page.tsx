@@ -21,7 +21,7 @@ export default function AdminLogin() {
     setError("");
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(auth, email.trim(), password);
       router.push("/admin"); // Redirect to dashboard on success
     } catch (err) {
       console.error("Login Error:", err);

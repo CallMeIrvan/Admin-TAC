@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AdminHeader } from "@/components/layout/AdminHeader";
 import { Loader2, Plus, Save, Trash2, ArrowLeft, GripVertical, CheckCircle2, Image as ImageIcon, Link as LinkIcon } from "lucide-react";
-import Link from "next/link";
 
 export interface QuestionOption {
   label: string;
@@ -22,6 +21,17 @@ export interface QuestionStatement {
   answer: "True" | "False";
 }
 
+export interface DragDropCategory {
+  id: string;
+  text: string;
+}
+
+export interface DragDropItem {
+  id: string;
+  text: string;
+  categoryId: string;
+}
+
 export interface QuestionData {
   id: number;
   question: string;
@@ -31,6 +41,8 @@ export interface QuestionData {
   options?: QuestionOption[];
   statements?: QuestionStatement[];
   answers: string[];
+  dragCategories?: DragDropCategory[];
+  dragItems?: DragDropItem[];
 }
 
 export default function ExamEditorPage() {
@@ -48,11 +60,29 @@ export default function ExamEditorPage() {
   const [examType, setExamType] = useState("1");
   const [questions, setQuestions] = useState<QuestionData[]>([]);
 
+  const [initialDataHash, setInitialDataHash] = useState("");
+  const isDirty = initialDataHash !== "" && initialDataHash !== JSON.stringify({ title, programId, examType, questions });
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty]);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setIsAdminAuth(true);
-        if (!isCreate) fetchExamData();
+        if (!isCreate) {
+          fetchExamData();
+        } else {
+          setInitialDataHash(JSON.stringify({ title: "", programId: "", examType: "1", questions: [] }));
+        }
       } else {
         router.push("/login");
       }
@@ -66,10 +96,16 @@ export default function ExamEditorPage() {
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
-        setTitle(data.title || "");
-        setProgramId(data.programId || "");
-        setExamType(data.type || "1");
-        setQuestions(data.questions || []);
+        const fTitle = data.title || "";
+        const fProg = data.programId || "";
+        const fType = data.type || "1";
+        const fQuestions = data.questions || [];
+
+        setTitle(fTitle);
+        setProgramId(fProg);
+        setExamType(fType);
+        setQuestions(fQuestions);
+        setInitialDataHash(JSON.stringify({ title: fTitle, programId: fProg, examType: fType, questions: fQuestions }));
       } else {
         alert("Exam not found!");
         router.push("/admin/exams");
@@ -97,13 +133,17 @@ export default function ExamEditorPage() {
         updatedAt: new Date().toISOString()
       };
 
+      // Mencegah error "Unsupported field value: undefined" dari Firebase
+      const safePayload = JSON.parse(JSON.stringify(payload));
+
       if (isCreate) {
-        await addDoc(collection(db, "exams"), payload);
+        await addDoc(collection(db, "exams"), safePayload);
         alert("Berhasil membuat paket ujian baru!");
         router.push("/admin/exams");
       } else {
-        await setDoc(doc(db, "exams", examId), payload, { merge: true });
+        await setDoc(doc(db, "exams", examId), safePayload, { merge: true });
         alert("Berhasil memperbarui paket ujian!");
+        router.push("/admin/exams");
       }
     } catch (error) {
       console.error("Error saving exam:", error);
@@ -156,7 +196,7 @@ export default function ExamEditorPage() {
     }
   };
 
-  const updateQuestion = (index: number, field: keyof QuestionData, value: any) => {
+  const updateQuestion = <K extends keyof QuestionData>(index: number, field: K, value: QuestionData[K]) => {
     const newQ = [...questions];
     newQ[index] = { ...newQ[index], [field]: value };
 
@@ -167,7 +207,10 @@ export default function ExamEditorPage() {
           newQ[index].options = [];
           newQ[index].answers = [];
        } else if (value === "drag_and_drop") {
-          newQ[index].options = [{ label: "A", text: "[Drag & Drop Area]" }];
+          const defaultCatId = `cat_${Date.now()}`;
+          newQ[index].dragCategories = [{ id: defaultCatId, text: "" }];
+          newQ[index].dragItems = [{ id: `item_${Date.now()}`, text: "", categoryId: defaultCatId }];
+          newQ[index].options = [];
           newQ[index].statements = [];
        } else {
           if (!newQ[index].options || newQ[index].options.length === 0) {
@@ -246,6 +289,53 @@ export default function ExamEditorPage() {
     }
   };
 
+  // --- Drag & Drop Helpers ---
+  const addDragCategory = (qIndex: number) => {
+    const newQ = [...questions];
+    const cats = newQ[qIndex].dragCategories || [];
+    cats.push({ id: `cat_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, text: "" });
+    newQ[qIndex].dragCategories = cats;
+    setQuestions(newQ);
+  };
+  const updateDragCategory = (qIndex: number, cIndex: number, text: string) => {
+    const newQ = [...questions];
+    if (newQ[qIndex].dragCategories) {
+      newQ[qIndex].dragCategories[cIndex].text = text;
+      setQuestions(newQ);
+    }
+  };
+  const removeDragCategory = (qIndex: number, cIndex: number) => {
+    const newQ = [...questions];
+    if (newQ[qIndex].dragCategories) {
+      newQ[qIndex].dragCategories.splice(cIndex, 1);
+      setQuestions(newQ);
+    }
+  };
+
+  const addDragItem = (qIndex: number) => {
+    const newQ = [...questions];
+    const items = newQ[qIndex].dragItems || [];
+    const defaultCat = newQ[qIndex].dragCategories?.[0]?.id || "";
+    items.push({ id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, text: "", categoryId: defaultCat });
+    newQ[qIndex].dragItems = items;
+    setQuestions(newQ);
+  };
+  const updateDragItem = (qIndex: number, iIndex: number, field: "text" | "categoryId", val: string) => {
+    const newQ = [...questions];
+    if (newQ[qIndex].dragItems) {
+      newQ[qIndex].dragItems[iIndex] = { ...newQ[qIndex].dragItems[iIndex], [field]: val };
+      setQuestions(newQ);
+    }
+  };
+  const removeDragItem = (qIndex: number, iIndex: number) => {
+    const newQ = [...questions];
+    if (newQ[qIndex].dragItems) {
+      newQ[qIndex].dragItems.splice(iIndex, 1);
+      setQuestions(newQ);
+    }
+  };
+
+
   if (!isAdminAuth || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -262,11 +352,17 @@ export default function ExamEditorPage() {
       <div className="sticky top-0 z-40 bg-white border-b shadow-sm w-full">
          <div className="container mx-auto px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
              <div className="flex items-center gap-4">
-                <Link href="/admin/exams">
-                   <Button variant="ghost" size="icon" className="rounded-full">
-                      <ArrowLeft className="w-5 h-5" />
-                   </Button>
-                </Link>
+                 <Button variant="ghost" size="icon" className="rounded-full" onClick={() => {
+                    if (isDirty) {
+                       if (confirm("Ada perubahan yang belum disimpan. Yakin ingin kembali?")) {
+                          router.push("/admin/exams");
+                       }
+                    } else {
+                       router.push("/admin/exams");
+                    }
+                 }}>
+                    <ArrowLeft className="w-5 h-5" />
+                 </Button>
                 <div>
                    <h2 className="text-xl font-bold text-slate-800">
                       {isCreate ? "Buat Paket Ujian" : "Edit Paket Ujian"}
@@ -383,7 +479,7 @@ export default function ExamEditorPage() {
                                 <select 
                                     className="w-full p-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
                                     value={q.type}
-                                    onChange={(e) => updateQuestion(qIndex, "type", e.target.value)}
+                                    onChange={(e) => updateQuestion(qIndex, "type", e.target.value as QuestionData["type"])}
                                 >
                                     <option value="single">Pilihan Ganda (1 Jawaban)</option>
                                     <option value="multiple">Pilihan Ganda (Banyak Jawaban)</option>
@@ -395,7 +491,7 @@ export default function ExamEditorPage() {
 
                         {/* RENDER OPTIONS BASED ON TYPE */}
                         <div className="pl-0 sm:pl-4 space-y-3">
-                           {(q.type === "single" || q.type === "multiple" || q.type === "drag_and_drop") && (
+                           {(q.type === "single" || q.type === "multiple") && (
                                <div className="space-y-3">
                                    {q.options?.map((opt, optIndex) => (
                                        <div key={optIndex} className="flex items-center gap-3">
@@ -453,6 +549,69 @@ export default function ExamEditorPage() {
                                    <Button variant="ghost" size="sm" onClick={() => addStatement(qIndex)} className="text-blue-600 hover:text-blue-800 hover:bg-blue-50">
                                        <Plus className="w-4 h-4 mr-1" /> Tambah Pernyataan
                                    </Button>
+                               </div>
+                           )}
+
+                           {q.type === "drag_and_drop" && (
+                               <div className="space-y-6">
+                                   <div className="bg-blue-50/50 p-4 border border-blue-100 rounded-lg space-y-3">
+                                       <label className="text-sm font-bold text-blue-800 flex justify-between items-center">
+                                          1. Daftar Kategori (Kiri)
+                                          <Button variant="outline" size="sm" onClick={() => addDragCategory(qIndex)} className="h-7 text-xs bg-white text-blue-600 border-blue-200 shadow-sm">
+                                              <Plus className="w-3 h-3 mr-1" /> Kategori
+                                          </Button>
+                                       </label>
+                                       {q.dragCategories?.map((cat, cIndex) => (
+                                           <div key={cat.id} className="flex flex-col sm:flex-row items-center gap-2">
+                                               <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded font-mono hidden sm:block">{cIndex + 1}</span>
+                                               <Input 
+                                                  value={cat.text}
+                                                  onChange={e => updateDragCategory(qIndex, cIndex, e.target.value)}
+                                                  placeholder="Nama Kategori (Contoh: Input)"
+                                                  className="bg-white border-blue-200"
+                                               />
+                                               <Button variant="ghost" size="icon" className="text-slate-400 hover:text-red-500 h-9 w-9" onClick={() => removeDragCategory(qIndex, cIndex)}>
+                                                  <Trash2 className="w-4 h-4" />
+                                               </Button>
+                                           </div>
+                                       ))}
+                                   </div>
+
+                                   <div className="bg-indigo-50/50 p-4 border border-indigo-100 rounded-lg space-y-3">
+                                       <label className="text-sm font-bold text-indigo-800 flex justify-between items-center">
+                                          2. Daftar Item & Kunci Jawaban (Kanan)
+                                          <Button variant="outline" size="sm" onClick={() => addDragItem(qIndex)} className="h-7 text-xs bg-white text-indigo-600 border-indigo-200 shadow-sm">
+                                              <Plus className="w-3 h-3 mr-1" /> Item Soal
+                                          </Button>
+                                       </label>
+                                       <div className="text-xs text-indigo-500 italic mb-2">Tentukan ke dalam kategori mana item ini seharusnya diletakkan (Kunci Jawaban).</div>
+                                       {q.dragItems?.map((item, iIndex) => (
+                                           <div key={item.id} className="flex flex-col xl:flex-row items-center gap-2 bg-white p-2 rounded-md border border-indigo-100 shadow-sm">
+                                               <Input 
+                                                  value={item.text}
+                                                  onChange={e => updateDragItem(qIndex, iIndex, "text", e.target.value)}
+                                                  placeholder="Nama Item (Contoh: Keyboard)"
+                                                  className="border-indigo-200 bg-slate-50 flex-1 w-full"
+                                               />
+                                               <div className="flex items-center gap-2 shrink-0 w-full xl:w-auto justify-end">
+                                                   <span className="text-xs font-semibold text-slate-400">➡️ Masuk ke:</span>
+                                                   <select 
+                                                      className="p-2 border border-slate-300 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                                                      value={item.categoryId}
+                                                      onChange={e => updateDragItem(qIndex, iIndex, "categoryId", e.target.value)}
+                                                   >
+                                                      <option value="" disabled>-- Pilih Kunci --</option>
+                                                      {q.dragCategories?.map(cat => (
+                                                          <option key={cat.id} value={cat.id}>{cat.text || "(Kosong)"}</option>
+                                                      ))}
+                                                   </select>
+                                                   <Button variant="ghost" size="icon" className="text-slate-400 hover:text-red-500 h-9 w-9 shrink-0" onClick={() => removeDragItem(qIndex, iIndex)}>
+                                                      <Trash2 className="w-4 h-4" />
+                                                   </Button>
+                                               </div>
+                                           </div>
+                                       ))}
+                                   </div>
                                </div>
                            )}
                         </div>

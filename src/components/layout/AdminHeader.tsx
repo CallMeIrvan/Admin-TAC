@@ -18,10 +18,9 @@ export function AdminHeader() {
            {/* Top bar on Mobile (Logo + Logout wrapper) */}
            <div className="flex items-center justify-between w-full lg:w-auto">
               <div className="flex items-center gap-3">
-                 <div className="bg-white p-1 rounded-md shadow-sm">
-                    <Image src="/logo/logo-tac.png" alt="Logo TAC" width={32} height={32} className="object-contain" />
+                 <div className="bg-white px-3 py-1.5 rounded-lg shadow-sm">
+                    <Image src="/logo/logo-tac.png" alt="Logo TAC" width={70} height={40} className="object-contain" priority />
                  </div>
-                 <h1 className="text-xl font-bold tracking-tight">TAC Panel</h1>
               </div>
               
               {/* Logout Button (Moved here for mobile, hidden on Desktop via order / duplicated) */}

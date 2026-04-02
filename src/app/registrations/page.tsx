@@ -38,6 +38,17 @@ export default function AdminRegistrationsPage() {
     fetchRegistrations();
   }, []);
 
+  const formatWhatsAppNumber = (phone: string) => {
+      if (!phone) return "";
+      let cleaned = phone.replace(/[^0-9]/g, "");
+      if (cleaned.startsWith("0")) {
+          cleaned = "62" + cleaned.substring(1);
+      } else if (cleaned.startsWith("8")) {
+          cleaned = "62" + cleaned;
+      }
+      return cleaned;
+  };
+
   const getStatusColor = (status: string) => {
       switch(status) {
           case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
@@ -97,8 +108,8 @@ export default function AdminRegistrationsPage() {
                             <div className="font-medium text-slate-900">{reg.fullName}</div>
                             <div className="text-slate-500 flex flex-col">
                                 <span>{reg.email}</span>
-                                <a href={`https://wa.me/62${reg.whatsapp}`} className="text-green-600 hover:underline">
-                                    +62{reg.whatsapp}
+                                <a href={`https://wa.me/${formatWhatsAppNumber(reg.whatsapp)}`} className="text-green-600 hover:underline">
+                                    +{formatWhatsAppNumber(reg.whatsapp)}
                                 </a>
                             </div>
                         </td>

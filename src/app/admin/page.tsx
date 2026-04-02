@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { collection, query, where, getDocs, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, addDoc } from "firebase/firestore";
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
 import { db, auth } from "@/lib/firebase/client";
@@ -36,6 +36,17 @@ const getSecondaryAuth = () => {
     return getAuth(secondaryApp);
 };
 
+const formatWhatsAppNumber = (phone: string) => {
+    if (!phone) return "";
+    let cleaned = phone.replace(/[^0-9]/g, "");
+    if (cleaned.startsWith("0")) {
+        cleaned = "62" + cleaned.substring(1);
+    } else if (cleaned.startsWith("8")) {
+        cleaned = "62" + cleaned;
+    }
+    return cleaned;
+};
+
 export interface OrderData {
   id: string;
   fullName: string;
@@ -47,6 +58,7 @@ export interface OrderData {
   paymentStatus: string;
   uid?: string;
   accountStatus?: string;
+  password?: string;
 }
 
 export default function AdminDashboard() {
@@ -59,9 +71,21 @@ export default function AdminDashboard() {
   
   // Modal State
   const [selectedOrder, setSelectedOrder] = useState<OrderData | null>(null);
+  const [infoModalOrder, setInfoModalOrder] = useState<OrderData | null>(null);
   const [password, setPassword] = useState("Tac123!");
   const [isProcessing, setIsProcessing] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+
+  // Add Manual Modal State
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [addFormData, setAddFormData] = useState({
+      fullName: "",
+      email: "",
+      whatsapp: "",
+      registrationType: "sertifikasi",
+      program: ""
+  });
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -136,12 +160,13 @@ export default function AdminDashboard() {
           await updateDoc(orderRef, {
               paymentStatus: "approved",
               uid: userId,
-              accountStatus: "active" 
+              accountStatus: "active",
+              password: password 
           });
 
           setSuccessMessage(isExistingUser ? "Pendaftaran disetujui! (Akun peserta ini sudah ada sebelumnya, menggunakan akses lama)." : "Akun berhasil dibuat dan pembayaran disetujui!");
           
-          const approvedOrder = { ...selectedOrder, paymentStatus: "approved", uid: userId, accountStatus: "active" };
+          const approvedOrder = { ...selectedOrder, paymentStatus: "approved", uid: userId, accountStatus: "active", password };
           setPendingOrders(prev => prev.filter(o => o.id !== selectedOrder.id));
           setApprovedOrders(prev => [approvedOrder, ...prev]);
       } else {
@@ -209,6 +234,34 @@ export default function AdminDashboard() {
       setPassword("Tac123!");
   };
 
+  const handleAddManualOrder = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setIsAdding(true);
+      try {
+          const newOrder = {
+              fullName: addFormData.fullName,
+              email: addFormData.email,
+              whatsapp: addFormData.whatsapp,
+              registrationType: addFormData.registrationType,
+              program: addFormData.program,
+              origin: "Manual by Admin",
+              paymentStatus: "pending"
+          };
+          
+          const docRef = await addDoc(collection(db, "orders"), newOrder);
+          const createdOrder = { id: docRef.id, ...newOrder } as OrderData;
+          
+          setPendingOrders(prev => [createdOrder, ...prev]);
+          setIsAddModalOpen(false);
+          setAddFormData({ fullName: "", email: "", whatsapp: "", registrationType: "sertifikasi", program: "" });
+          alert("Peserta berhasil ditambahkan secara manual! Sekarang Anda bisa melakukan Approve.");
+      } catch (err) {
+          alert("Gagal menambahkan peserta: " + (err as Error).message);
+      } finally {
+          setIsAdding(false);
+      }
+  };
+
   if (!isAdminAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -248,7 +301,12 @@ export default function AdminDashboard() {
                         {data.map(order => (
                             <tr key={order.id} className="hover:bg-slate-50/50 transition-colors">
                                 <td className="px-6 py-4">
-                                    <p className="font-semibold text-slate-900">{order.fullName}</p>
+                                    <button 
+                                        onClick={() => setInfoModalOrder(order)}
+                                        className="font-semibold text-blue-600 hover:text-blue-800 hover:underline text-left"
+                                    >
+                                        {order.fullName}
+                                    </button>
                                     <div className="flex gap-2 mt-1">
                                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${type === 'pending' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800'}`}>
                                             {order.paymentStatus.toUpperCase()}
@@ -302,6 +360,10 @@ export default function AdminDashboard() {
                                             </DropdownMenuTrigger>
                                             <DropdownMenuContent align="end">
                                                 <DropdownMenuLabel>Manajemen Akun</DropdownMenuLabel>
+                                                <DropdownMenuItem onClick={() => setInfoModalOrder(order)}>
+                                                    <UserPlus className="mr-2 h-4 w-4" />
+                                                    Lihat Info Akun
+                                                </DropdownMenuItem>
                                                 <DropdownMenuItem onClick={() => handleResetPassword(order)}>
                                                     <KeyRound className="mr-2 h-4 w-4" />
                                                     Ubah Password
@@ -346,10 +408,16 @@ export default function AdminDashboard() {
                    <h2 className="text-2xl font-bold text-slate-800">Manajemen Peserta</h2>
                    <p className="text-sm text-slate-500">Kelola persetujuan, akses Tryout, dan pengaturan akun.</p>
                 </div>
-                <TabsList className="grid w-full sm:w-[400px] grid-cols-2">
-                    <TabsTrigger value="pending">Menunggu Persetujuan</TabsTrigger>
-                    <TabsTrigger value="approved">Akun Aktif / Selesai</TabsTrigger>
-                </TabsList>
+                <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                    <Button onClick={() => setIsAddModalOpen(true)} className="bg-slate-800 hover:bg-slate-900 text-white w-full sm:w-auto">
+                        <UserPlus className="w-4 h-4 mr-2" />
+                        Tambah Manual
+                    </Button>
+                    <TabsList className="grid w-full sm:w-[400px] grid-cols-2">
+                        <TabsTrigger value="pending">Menunggu Persetujuan</TabsTrigger>
+                        <TabsTrigger value="approved">Akun Aktif / Selesai</TabsTrigger>
+                    </TabsList>
+                </div>
             </div>
 
             <TabsContent value="pending" className="animate-in fade-in-50 zoom-in-95 duration-300">
@@ -407,20 +475,21 @@ export default function AdminDashboard() {
                                 </p>
                             </div>
 
-                            <div className="flex gap-3 justify-center">
-                                <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => {
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                                <Button className="w-full bg-green-600 hover:bg-green-700 text-white shadow-sm" onClick={() => {
                                     let adminMsg = "";
                                     if (selectedOrder.registrationType === "sertifikasi") {
                                         adminMsg = `Halo ${selectedOrder.fullName}! Pendaftaran Anda telah kami setujui. Sekarang Anda sudah bisa login ke sistem Tryout The A Class.\n\nEmail: ${selectedOrder.email}\nPassword: ${password}\n\nSilahkan login di: https://theaclassdps.com/tryout/login`;
                                     } else {
                                         adminMsg = `Halo ${selectedOrder.fullName}! Pendaftaran Kursus Anda telah kami setujui. Terima kasih telah bergabung dengan The A Class. Jadwal dan informasi kelas akan segera kami infokan lebih lanjut.`;
                                     }
-                                    window.open(`https://wa.me/${selectedOrder.whatsapp.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(adminMsg)}`, "_blank");
+                                    const formattedWa = formatWhatsAppNumber(selectedOrder.whatsapp);
+                                    window.open(`https://wa.me/${formattedWa}?text=${encodeURIComponent(adminMsg)}`, "_blank");
                                     closeModal();
                                 }}>
-                                   Kirim Info via WhatsApp & Tutup
+                                   Kirim via WhatsApp
                                 </Button>
-                                <Button variant="outline" className="w-full" onClick={closeModal}>Tutup (Sudah Dikirim)</Button>
+                                <Button variant="outline" className="w-full shadow-sm" onClick={closeModal}>Tutup (Selesai)</Button>
                             </div>
                          </div>
                      ) : (
@@ -466,6 +535,128 @@ export default function AdminDashboard() {
                             </div>
                         </form>
                      )}
+                 </div>
+             </div>
+          </div>
+      )}
+
+      {/* Add Manual Modal */}
+      {isAddModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+                 <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                     <div>
+                         <h3 className="font-bold text-lg text-slate-900">Tambah Peserta Manual</h3>
+                         <p className="text-xs text-slate-500">Buat pesanan baru untuk dimasukkan ke sistem.</p>
+                     </div>
+                 </div>
+                 
+                 <div className="px-6 py-6 overflow-y-auto">
+                     <form onSubmit={handleAddManualOrder} className="space-y-4">
+                         <div>
+                             <label className="block text-xs font-semibold text-slate-500 mb-1">Nama Lengkap *</label>
+                             <Input required value={addFormData.fullName} onChange={(e) => setAddFormData({...addFormData, fullName: e.target.value})} placeholder="Cth: Budi Santoso" />
+                         </div>
+                         <div>
+                             <label className="block text-xs font-semibold text-slate-500 mb-1">Email *</label>
+                             <Input required type="email" value={addFormData.email} onChange={(e) => setAddFormData({...addFormData, email: e.target.value})} placeholder="Cth: budi@gmail.com" />
+                         </div>
+                         <div>
+                             <label className="block text-xs font-semibold text-slate-500 mb-1">No. WhatsApp *</label>
+                             <Input required value={addFormData.whatsapp} onChange={(e) => setAddFormData({...addFormData, whatsapp: e.target.value})} placeholder="Cth: 081234567890" />
+                         </div>
+                         <div>
+                             <label className="block text-xs font-semibold text-slate-500 mb-1">Tipe Pendaftaran</label>
+                             <select 
+                                 className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2"
+                                 value={addFormData.registrationType}
+                                 onChange={(e) => setAddFormData({...addFormData, registrationType: e.target.value})}
+                             >
+                                 <option value="sertifikasi">Sertifikasi & Tryout</option>
+                                 <option value="kursus">Kursus (Tanpa Tryout)</option>
+                             </select>
+                         </div>
+                         <div>
+                             <label className="block text-xs font-semibold text-slate-500 mb-1">Nama / ID Program *</label>
+                             <Input required value={addFormData.program} onChange={(e) => setAddFormData({...addFormData, program: e.target.value})} placeholder="Cth: ic3, its, adobe-photoshop" />
+                         </div>
+
+                         <div className="flex justify-end gap-3 mt-8">
+                             <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)} disabled={isAdding}>Batal</Button>
+                             <Button type="submit" disabled={isAdding} className="bg-blue-600 hover:bg-blue-700">
+                                 {isAdding && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                                 Tambahkan User
+                             </Button>
+                         </div>
+                     </form>
+                 </div>
+             </div>
+          </div>
+      )}
+
+      {/* Info Detail Modal */}
+      {infoModalOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col transform transition-all">
+                 <div className="bg-gradient-to-r from-slate-800 to-slate-900 px-6 py-6 text-center relative">
+                     <button 
+                         onClick={() => setInfoModalOrder(null)}
+                         className="absolute top-4 right-4 text-slate-400 hover:text-white"
+                     >
+                         ✕
+                     </button>
+                     <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-3 shadow-lg text-slate-800 font-bold text-3xl">
+                         {infoModalOrder.fullName.charAt(0).toUpperCase()}
+                     </div>
+                     <h3 className="font-bold text-xl text-white">{infoModalOrder.fullName}</h3>
+                     <p className="text-blue-200 text-sm">{infoModalOrder.email}</p>
+                 </div>
+                 
+                 <div className="px-6 py-6 space-y-4 bg-slate-50">
+                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                         <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Status Akun</div>
+                         <div className="flex items-center gap-2">
+                             <div className={`w-2.5 h-2.5 rounded-full ${infoModalOrder.accountStatus === 'disabled' ? 'bg-red-500' : infoModalOrder.paymentStatus === 'approved' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                             <span className="font-medium text-slate-700 capitalize">
+                                 {infoModalOrder.accountStatus === 'disabled' ? 'Nonaktif' : infoModalOrder.paymentStatus}
+                             </span>
+                         </div>
+                     </div>
+
+                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 grid grid-cols-2 gap-4">
+                         <div>
+                             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">WhatsApp</div>
+                             <div className="font-medium text-slate-700">{infoModalOrder.whatsapp}</div>
+                         </div>
+                         <div>
+                             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Program</div>
+                             <div className="font-medium text-slate-700 uppercase">{infoModalOrder.program}</div>
+                         </div>
+                     </div>
+
+                     {(infoModalOrder.registrationType === "sertifikasi" || infoModalOrder.password) && (
+                         <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                             <div className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">Informasi Login Tryout</div>
+                             <div className="flex flex-col mt-2">
+                                 <span className="text-sm text-slate-600">Email: <strong className="text-slate-800">{infoModalOrder.email}</strong></span>
+                                 <span className="text-sm text-slate-600">Password: <strong className="text-slate-800 select-all">{infoModalOrder.password || "Tac123!"}</strong></span>
+                             </div>
+                             {!infoModalOrder.password && (
+                                 <p className="text-[10px] text-slate-400 mt-2 italic">*Menggunakan password default karena tidak tersimpan sebelumnya.</p>
+                             )}
+                         </div>
+                     )}
+
+                     <div className="pt-2">
+                         <Button className="w-full bg-green-600 hover:bg-green-700 text-white shadow-sm" onClick={() => {
+                             const pwText = infoModalOrder.password ? infoModalOrder.password : "Tac123!";
+                             const adminMsg = `Halo ${infoModalOrder.fullName}! Berikut adalah informasi akun Anda untuk login ke sistem Tryout The A Class.\n\nEmail: ${infoModalOrder.email}\nPassword: ${pwText}\n\nSilahkan login di: https://theaclassdps.com/tryout/login`;
+                             const formattedWa = formatWhatsAppNumber(infoModalOrder.whatsapp);
+                             window.open(`https://wa.me/${formattedWa}?text=${encodeURIComponent(adminMsg)}`, "_blank");
+                         }}>
+                            Hubungi via WhatsApp
+                         </Button>
+                     </div>
                  </div>
              </div>
           </div>

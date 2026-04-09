@@ -39,6 +39,7 @@ export default function ProgramEditorPage({ params }: ProgramEditorProps) {
     privatePrice: "",
     minParticipants: "",
     isFixedQuota: false,
+    isFeatured: false,
     details: "",
     seoTitle: "",
     seoDescription: ""
@@ -63,6 +64,7 @@ export default function ProgramEditorPage({ params }: ProgramEditorProps) {
               privatePrice: data.privatePrice?.toString() || "",
               minParticipants: data.minParticipants?.toString() || "",
               isFixedQuota: data.isFixedQuota || false,
+              isFeatured: data.isFeatured || false,
               details: data.details || "",
               seoTitle: data.seoTitle || "",
               seoDescription: data.seoDescription || ""
@@ -109,6 +111,7 @@ export default function ProgramEditorPage({ params }: ProgramEditorProps) {
           packagePrice: formData.packagePrice ? parseInt(formData.packagePrice) : null,
           privatePrice: formData.privatePrice ? parseInt(formData.privatePrice) : null,
           minParticipants: formData.minParticipants ? parseInt(formData.minParticipants) : null,
+          isFeatured: formData.isFeatured,
       }, { merge: true });
 
       alert("Program berhasil disimpan!");
@@ -208,6 +211,22 @@ export default function ProgramEditorPage({ params }: ProgramEditorProps) {
                                     <option value="Lanjutan">Lanjutan</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-200 w-fit hover:bg-slate-100 transition-colors">
+                                <input 
+                                    type="checkbox" 
+                                    name="isFeatured" 
+                                    checked={formData.isFeatured} 
+                                    onChange={handleChange} 
+                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" 
+                                />
+                                Jadikan Program Unggulan
+                            </label>
+                            <p className="text-xs text-slate-500 mt-2">
+                                Program yang ditandai sebagai unggulan akan otomatis muncul di section &quot;Program Unggulan Pilihan&quot; pada halaman utama website.
+                            </p>
                         </div>
                     </div>
                 </div>
